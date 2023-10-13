@@ -307,6 +307,20 @@ resource "aws_codebuild_project" "default" {
     if length(value) > 0
   }
 
+  dynamic "build_batch_config" {
+    for_each = var.build_batch_config.enabled ? [1] : []
+    content {
+      combine_artifacts = var.build_batch_config.combine_artifacts
+      service_role      = var.build_batch_config.service_role
+      timeout_in_mins   = var.build_batch_config.timeout_in_mins
+
+      restrictions {
+        maximum_builds_allowed = var.build_batch_config.restrictions.maximum_builds_allowed
+        compute_types_allowed  = var.build_batch_config.restrictions.compute_types_allowed
+      }
+    }
+  }
+
   artifacts {
     type     = var.artifact_type
     location = var.artifact_location
@@ -324,7 +338,7 @@ resource "aws_codebuild_project" "default" {
       type                = "S3"
       location            = var.secondary_artifact_location
       artifact_identifier = var.secondary_artifact_identifier
-      encryption_disabled = ! var.secondary_artifact_encryption_enabled
+      encryption_disabled = !var.secondary_artifact_encryption_enabled
       # According to AWS documention, in order to have the artifacts written
       # to the root of the bucket, the 'namespace_type' should be 'NONE'
       # (which is the default), 'name' should be '/', and 'path' should be

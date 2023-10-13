@@ -1,3 +1,23 @@
+variable "build_batch_config" {
+  type = object(
+    {
+      enabled           = optional(bool, false)
+      combine_artifacts = optional(bool, false)
+      restrictions = object(
+        {
+          compute_types_allowed  = optional(list(string), ["BUILD_GENERAL1_SMALL"])
+          maximum_builds_allowed = optional(number, 1)
+        }
+      )
+      service_role    = optional(string)
+      timeout_in_mins = optional(number, 20)
+    }
+  )
+  default = {
+    restrictions = {}
+  }
+}
+
 variable "environment_variables" {
   type = list(object(
     {
