@@ -138,8 +138,8 @@ resource "aws_iam_policy" "default_cache_bucket" {
 }
 
 data "aws_s3_bucket" "secondary_artifact" {
-  count  = module.this.enabled ? (var.secondary_artifact_location != null ? 1 : 0) : 0
-  bucket = var.secondary_artifact_location
+  for_each = module.this.enabled ? var.secondary_artifacts : {}
+  bucket   = each.value.bucket_location
 }
 
 data "aws_iam_policy_document" "permissions" {
@@ -173,21 +173,22 @@ data "aws_iam_policy_document" "permissions" {
   }
 
   dynamic "statement" {
-    for_each = var.secondary_artifact_location != null ? [1] : []
+    for_each = data.aws_s3_bucket.secondary_artifact
     content {
       sid = ""
 
       actions = [
         "s3:PutObject",
         "s3:GetBucketAcl",
-        "s3:GetBucketLocation"
+        "s3:GetBucketLocation",
+        "s3:ListBucket"
       ]
 
       effect = "Allow"
 
       resources = [
-        join("", data.aws_s3_bucket.secondary_artifact.*.arn),
-        "${join("", data.aws_s3_bucket.secondary_artifact.*.arn)}/*",
+        statement.value.arn,
+        join("/", [statement.value.arn, "*"])
       ]
     }
   }
@@ -326,27 +327,16 @@ resource "aws_codebuild_project" "default" {
     location = var.artifact_location
   }
 
-  # Since the output type is restricted to S3 by the provider (this appears to
-  # be an bug in AWS, rather than an architectural decision; see this issue for
-  # discussion: https://github.com/hashicorp/terraform-provider-aws/pull/9652),
-  # this cannot be a CodePipeline output. Otherwise, _all_ of the artifacts
-  # would need to be secondary if there were more than one. For reference, see
-  # https://docs.aws.amazon.com/codepipeline/latest/userguide/action-reference-CodeBuild.html#action-reference-CodeBuild-config.
   dynamic "secondary_artifacts" {
-    for_each = var.secondary_artifact_location != null ? [1] : []
+    for_each = var.secondary_artifacts
     content {
       type                = "S3"
-      location            = var.secondary_artifact_location
-      artifact_identifier = var.secondary_artifact_identifier
-      encryption_disabled = !var.secondary_artifact_encryption_enabled
-      # According to AWS documention, in order to have the artifacts written
-      # to the root of the bucket, the 'namespace_type' should be 'NONE'
-      # (which is the default), 'name' should be '/', and 'path' should be
-      # empty. For reference, see https://docs.aws.amazon.com/codebuild/latest/APIReference/API_ProjectArtifacts.html.
-      # However, I was unable to get this to deploy to the root of the bucket
-      # unless path was also set to '/'.
-      path = "/"
-      name = "/"
+      artifact_identifier = secondary_artifacts.key
+
+      location            = secondary_artifacts.value.bucket_location
+      encryption_disabled = !secondary_artifacts.value.encryption_enabled
+      path                = secondary_artifacts.value.path
+      name                = secondary_artifacts.value.name
     }
   }
 

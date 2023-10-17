@@ -189,22 +189,28 @@ variable "artifact_location" {
   description = "Location of artifact. Applies only for artifact of type S3"
 }
 
-variable "secondary_artifact_location" {
-  type        = string
-  default     = null
-  description = "Location of secondary artifact. Must be an S3 reference"
-}
-
-variable "secondary_artifact_identifier" {
-  type        = string
-  default     = null
-  description = "Secondary artifact identifier. Must match the identifier in the build spec"
-}
-
-variable "secondary_artifact_encryption_enabled" {
-  type        = bool
-  default     = false
-  description = "Set to true to enable encryption on the secondary artifact bucket"
+variable "secondary_artifacts" {
+  type = map(object(
+    {
+      bucket_location    = string
+      encryption_enabled = optional(bool, false)
+      # According to AWS documention, in order to have the artifacts written
+      # to the root of the bucket, the 'namespace_type' should be 'NONE'
+      # (which is the default), 'name' should be '/', and 'path' should be
+      # empty. For reference, see https://docs.aws.amazon.com/codebuild/latest/APIReference/API_ProjectArtifacts.html.
+      # However, I was unable to get this to deploy to the root of the bucket
+      # unless path was also set to '/'.
+      path = optional(string, "/")
+      name = optional(string, "/")
+  }))
+  default     = {}
+  description = "(Optional) S3 secondary artifacts destination for the codebuild project in addition to the primary artifact. Key is artifact identifier. See: https://docs.aws.amazon.com/codebuild/latest/APIReference/API_ProjectArtifacts.html"
+  # Since the output type is restricted to S3 by the provider (this appears to
+  # be an bug in AWS, rather than an architectural decision; see this issue for
+  # discussion: https://github.com/hashicorp/terraform-provider-aws/pull/9652),
+  # this cannot be a CodePipeline output. Otherwise, _all_ of the artifacts
+  # would need to be secondary if there were more than one. For reference, see
+  # https://docs.aws.amazon.com/codepipeline/latest/userguide/action-reference-CodeBuild.html#action-reference-CodeBuild-config.
 }
 
 variable "report_build_status" {
