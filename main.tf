@@ -93,6 +93,7 @@ locals {
   cache = local.cache_options[var.cache_type]
 }
 
+# Main IAM Role
 resource "aws_iam_role" "default" {
   count                 = module.this.enabled ? 1 : 0
   name                  = module.this.id
@@ -283,6 +284,47 @@ resource "aws_iam_role_policy_attachment" "default_cache_bucket" {
   role       = join("", aws_iam_role.default.*.id)
 }
 
+# Build Batch IAM Role
+resource "aws_iam_role" "build_batch" {
+  count = module.this.enabled && var.build_batch_config.enabled ? 1 : 0
+
+  name                  = "${module.this.id}-batch"
+  assume_role_policy    = data.aws_iam_policy_document.role.json
+  force_detach_policies = true
+  path                  = var.iam_role_path
+
+  tags = module.this.tags
+}
+
+data "aws_iam_policy_document" "build_batch" {
+  count = module.this.enabled && var.build_batch_config.enabled ? 1 : 0
+
+  statement {
+    sid = ""
+
+    actions = [
+      "codebuild:StartBuild",
+      "codebuild:StopBuild",
+      "codebuild:RetryBuild"
+    ]
+
+    effect = "Allow"
+
+    resources = [
+      join("", aws_codebuild_project.default.*.arn)
+    ]
+  }
+}
+
+resource "aws_iam_role_policy" "build_batch" {
+  count = module.this.enabled && var.build_batch_config.enabled ? 1 : 0
+
+  name_prefix = "${module.this.id}-build-batch"
+  role        = join("", aws_iam_role.build_batch.*.id)
+  policy      = join("", data.aws_iam_policy_document.build_batch.*.json)
+}
+
+# CodeBuild Config
 resource "aws_codebuild_source_credential" "authorization" {
   count       = module.this.enabled && var.private_repository ? 1 : 0
   auth_type   = var.source_credential_auth_type
@@ -311,8 +353,8 @@ resource "aws_codebuild_project" "default" {
   dynamic "build_batch_config" {
     for_each = var.build_batch_config.enabled ? [1] : []
     content {
+      service_role      = join("", aws_iam_role.build_batch.*.arn)
       combine_artifacts = var.build_batch_config.combine_artifacts
-      service_role      = var.build_batch_config.service_role
       timeout_in_mins   = var.build_batch_config.timeout_in_mins
 
       restrictions {

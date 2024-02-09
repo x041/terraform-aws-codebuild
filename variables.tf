@@ -9,7 +9,6 @@ variable "build_batch_config" {
           maximum_builds_allowed = optional(number, 1)
         }
       )
-      service_role    = optional(string)
       timeout_in_mins = optional(number, 20)
     }
   )
