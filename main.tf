@@ -531,3 +531,26 @@ resource "aws_codebuild_project" "default" {
     }
   }
 }
+
+# Webhook (GitHub)
+resource "aws_codebuild_webhook" "default" {
+  count = module.this.enabled && var.webhook.enabled ? 1 : 0
+
+  project_name = join("", aws_codebuild_project.default.*.name)
+
+  build_type = module.this.enabled && var.build_batch_config.enabled ? "BUILD_BATCH" : "BUILD"
+
+  dynamic "filter_group" {
+    for_each = var.webhook.filter_groups
+    content {
+      dynamic "filter" {
+        for_each = filter_group.value.filters
+        content {
+          type                    = filter.value.type
+          pattern                 = filter.value.pattern
+          exclude_matched_pattern = filter.value.exclude
+        }
+      }
+    }
+  }
+}

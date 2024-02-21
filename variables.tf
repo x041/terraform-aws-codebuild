@@ -344,3 +344,18 @@ variable "s3_cache_bucket_name" {
   default     = null
   description = "Use an existing s3 bucket name for cache. Relevant if `cache_type` is set to `S3`."
 }
+
+variable "webhook" {
+  type = object({
+    enabled = optional(bool, false)
+    filter_groups = optional(list(object({
+      filters = optional(list(object({
+        pattern = string
+        type    = string
+        exclude = optional(bool, false)
+      })), [])
+    })), [])
+  })
+  default     = {}
+  description = "Webhook configuration for the codebuild project"
+}
