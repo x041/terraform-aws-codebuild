@@ -1,8 +1,10 @@
 variable "build_batch_config" {
   type = object(
     {
-      enabled           = optional(bool, false)
-      combine_artifacts = optional(bool, false)
+      enabled                  = optional(bool, false)
+      combine_artifacts        = optional(bool, false)
+      iam_role_path            = optional(string, null)
+      iam_permissions_boundary = optional(string, null)
       restrictions = object(
         {
           compute_types_allowed  = optional(list(string), ["BUILD_GENERAL1_SMALL"])

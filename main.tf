@@ -291,7 +291,8 @@ resource "aws_iam_role" "build_batch" {
   name                  = "${module.this.id}-batch"
   assume_role_policy    = data.aws_iam_policy_document.role.json
   force_detach_policies = true
-  path                  = var.iam_role_path
+  path                  = try(var.build_batch_config.iam_role_path, var.iam_role_path)
+  permissions_boundary  = try(var.build_batch_config.iam_permissions_boundary, var.iam_permissions_boundary)
 
   tags = module.this.tags
 }
