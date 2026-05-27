@@ -10,7 +10,7 @@ output "project_id" {
 
 output "role_id" {
   description = "IAM Role ID"
-  value       = join("", aws_iam_role.default.*.id)
+  value       = var.role_arn != null ? regex("[^/]+$", var.role_arn) : join("", aws_iam_role.default.*.id)
 }
 
 output "role_arn" {
