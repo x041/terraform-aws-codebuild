@@ -15,7 +15,7 @@ output "role_id" {
 
 output "role_arn" {
   description = "IAM Role ARN"
-  value       = join("", aws_iam_role.default.*.arn)
+  value       = var.role_arn != null ? var.role_arn : join("", aws_iam_role.default.*.arn)
 }
 
 output "cache_bucket_name" {

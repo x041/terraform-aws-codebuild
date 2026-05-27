@@ -287,6 +287,12 @@ variable "extra_permissions" {
   description = "List of action strings which will be added to IAM service account permissions."
 }
 
+variable "role_arn" {
+  type        = string
+  default     = null
+  description = "(Optional) ARN of an existing IAM role to use as the CodeBuild service role. When set, IAM role and policy creation is skipped and the provided ARN is used directly."
+}
+
 variable "iam_role_path" {
   type        = string
   default     = null

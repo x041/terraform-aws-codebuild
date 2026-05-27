@@ -95,7 +95,7 @@ locals {
 
 # Main IAM Role
 resource "aws_iam_role" "default" {
-  count                 = module.this.enabled ? 1 : 0
+  count                 = module.this.enabled && var.role_arn == null ? 1 : 0
   name                  = module.this.id
   assume_role_policy    = data.aws_iam_policy_document.role.json
   force_detach_policies = true
@@ -122,7 +122,7 @@ data "aws_iam_policy_document" "role" {
 }
 
 resource "aws_iam_policy" "default" {
-  count  = module.this.enabled ? 1 : 0
+  count  = module.this.enabled && var.role_arn == null ? 1 : 0
   name   = module.this.id
   path   = var.iam_policy_path
   policy = data.aws_iam_policy_document.combined_permissions.json
@@ -273,13 +273,13 @@ data "aws_iam_policy_document" "permissions_cache_bucket" {
 }
 
 resource "aws_iam_role_policy_attachment" "default" {
-  count      = module.this.enabled ? 1 : 0
+  count      = module.this.enabled && var.role_arn == null ? 1 : 0
   policy_arn = join("", aws_iam_policy.default.*.arn)
   role       = join("", aws_iam_role.default.*.id)
 }
 
 resource "aws_iam_role_policy_attachment" "default_cache_bucket" {
-  count      = module.this.enabled && local.s3_cache_enabled ? 1 : 0
+  count      = module.this.enabled && local.s3_cache_enabled && var.role_arn == null ? 1 : 0
   policy_arn = join("", aws_iam_policy.default_cache_bucket.*.arn)
   role       = join("", aws_iam_role.default.*.id)
 }
@@ -339,7 +339,7 @@ resource "aws_codebuild_project" "default" {
   name                   = module.this.id
   description            = var.description
   concurrent_build_limit = var.concurrent_build_limit
-  service_role           = join("", aws_iam_role.default.*.arn)
+  service_role           = var.role_arn != null ? var.role_arn : join("", aws_iam_role.default.*.arn)
   badge_enabled          = var.badge_enabled
   build_timeout          = var.build_timeout
   source_version         = var.source_version != "" ? var.source_version : null
