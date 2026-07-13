@@ -2,6 +2,76 @@ data "aws_caller_identity" "default" {}
 
 data "aws_region" "default" {}
 
+resource "aws_s3_bucket_acl" "default" {
+  count      = module.this.enabled && local.create_s3_cache_bucket ? 1 : 0
+  bucket     = join("", resource.aws_s3_bucket.cache_bucket[*].id)
+  acl        = "private"
+  depends_on = [aws_s3_bucket_ownership_controls.s3_bucket_acl_ownership]
+}
+
+resource "aws_s3_bucket_ownership_controls" "s3_bucket_acl_ownership" {
+  count  = module.this.enabled && local.create_s3_cache_bucket ? 1 : 0
+  bucket = join("", resource.aws_s3_bucket.cache_bucket[*].id)
+  rule {
+    object_ownership = "BucketOwnerPreferred"
+  }
+}
+
+resource "aws_s3_bucket_versioning" "default" {
+  count  = module.this.enabled && local.create_s3_cache_bucket ? 1 : 0
+  bucket = join("", resource.aws_s3_bucket.cache_bucket[*].id)
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+resource "aws_s3_bucket_lifecycle_configuration" "default" {
+  count  = module.this.enabled && local.create_s3_cache_bucket ? 1 : 0
+  bucket = join("", resource.aws_s3_bucket.cache_bucket[*].id)
+
+  rule {
+    id     = "codebuildcache"
+    status = "Enabled"
+
+    filter {
+      prefix = "/"
+    }
+
+    expiration {
+      days = var.cache_expiration_days
+    }
+  }
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "default" {
+  count  = module.this.enabled && local.create_s3_cache_bucket ? 1 : 0
+  bucket = join("", resource.aws_s3_bucket.cache_bucket[*].id)
+
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
+}
+
+resource "aws_s3_bucket_logging" "default" {
+  count  = module.this.enabled && local.create_s3_cache_bucket && var.access_log_bucket_name != "" ? 1 : 0
+  bucket = join("", resource.aws_s3_bucket.cache_bucket[*].id)
+
+  target_bucket = var.access_log_bucket_name
+  target_prefix = "logs/${module.this.id}/"
+}
+
+resource "aws_s3_bucket_public_access_block" "default" {
+  count  = module.this.enabled && local.create_s3_cache_bucket ? 1 : 0
+  bucket = join("", resource.aws_s3_bucket.cache_bucket[*].id)
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
 resource "aws_s3_bucket" "cache_bucket" {
   #bridgecrew:skip=BC_AWS_S3_13:Skipping `Enable S3 Bucket Logging` check until bridgecrew will support dynamic blocks (https://github.com/bridgecrewio/checkov/issues/776).
   #bridgecrew:skip=BC_AWS_S3_14:Skipping `Ensure all data stored in the S3 bucket is securely encrypted at rest` check until bridgecrew will support dynamic blocks (https://github.com/bridgecrewio/checkov/issues/776).
@@ -10,42 +80,6 @@ resource "aws_s3_bucket" "cache_bucket" {
   bucket        = local.cache_bucket_name_normalised
   force_destroy = true
   tags          = module.this.tags
-
-  versioning {
-    enabled = var.versioning_enabled
-  }
-
-  dynamic "logging" {
-    for_each = var.access_log_bucket_name != "" ? [1] : []
-    content {
-      target_bucket = var.access_log_bucket_name
-      target_prefix = "logs/${module.this.id}/"
-    }
-  }
-
-  lifecycle_rule {
-    id      = "codebuildcache"
-    enabled = true
-
-    prefix = "/"
-    tags   = module.this.tags
-
-    expiration {
-      days = var.cache_expiration_days
-    }
-  }
-
-  dynamic "server_side_encryption_configuration" {
-    for_each = var.encryption_enabled ? ["true"] : []
-
-    content {
-      rule {
-        apply_server_side_encryption_by_default {
-          sse_algorithm = "AES256"
-        }
-      }
-    }
-  }
 }
 
 resource "random_string" "bucket_prefix" {
@@ -58,7 +92,7 @@ resource "random_string" "bucket_prefix" {
 }
 
 locals {
-  cache_bucket_name = "${module.this.id}${var.cache_bucket_suffix_enabled ? "-${join("", random_string.bucket_prefix.*.result)}" : ""}"
+  cache_bucket_name = "${module.this.id}${var.cache_bucket_suffix_enabled ? "-${join("", random_string.bucket_prefix[*].result)}" : ""}"
 
   ## Clean up the bucket name to use only hyphens, and trim its length to 63 characters.
   ## As per https://docs.aws.amazon.com/AmazonS3/latest/dev/BucketRestrictions.html
@@ -70,7 +104,10 @@ locals {
 
   s3_cache_enabled       = var.cache_type == "S3"
   create_s3_cache_bucket = local.s3_cache_enabled && var.s3_cache_bucket_name == null
-  s3_bucket_name         = local.create_s3_cache_bucket ? join("", aws_s3_bucket.cache_bucket.*.bucket) : var.s3_cache_bucket_name
+  s3_bucket_name         = local.create_s3_cache_bucket ? join("", aws_s3_bucket.cache_bucket[*].bucket) : var.s3_cache_bucket_name
+
+  aws_region     = signum(length(var.aws_region)) == 1 ? var.aws_region : data.aws_region.default.name
+  aws_account_id = signum(length(var.aws_account_id)) == 1 ? var.aws_account_id : data.aws_caller_identity.default.account_id
 
   ## This is the magic where a map of a list of maps is generated
   ## and used to conditionally add the cache bucket option to the
@@ -117,6 +154,17 @@ data "aws_iam_policy_document" "role" {
       identifiers = ["codebuild.amazonaws.com"]
     }
 
+    condition {
+      test     = "StringEquals"
+      variable = "aws:SourceArn"
+
+      # to avoid cyclic dependencies with codebuild, we can't reference
+      # the resources arn directly instead we interpolate the arn using known values
+      values = [
+        "arn:aws:codebuild:${local.aws_region}:${local.aws_account_id}:project/${module.this.id}"
+      ]
+    }
+
     effect = "Allow"
   }
 }
@@ -134,7 +182,7 @@ resource "aws_iam_policy" "default_cache_bucket" {
 
   name   = "${module.this.id}-cache-bucket"
   path   = var.iam_policy_path
-  policy = join("", data.aws_iam_policy_document.permissions_cache_bucket.*.json)
+  policy = join("", data.aws_iam_policy_document.permissions_cache_bucket[*].json)
   tags   = module.this.tags
 }
 
@@ -146,31 +194,35 @@ data "aws_s3_bucket" "secondary_artifact" {
 data "aws_iam_policy_document" "permissions" {
   count = module.this.enabled ? 1 : 0
 
-  statement {
-    sid = ""
+  dynamic "statement" {
+    for_each = var.default_permissions_enabled ? [1] : []
 
-    actions = compact(concat([
-      "codecommit:GitPull",
-      "ecr:BatchCheckLayerAvailability",
-      "ecr:CompleteLayerUpload",
-      "ecr:GetAuthorizationToken",
-      "ecr:InitiateLayerUpload",
-      "ecr:PutImage",
-      "ecr:UploadLayerPart",
-      "ecs:RunTask",
-      "iam:PassRole",
-      "logs:CreateLogGroup",
-      "logs:CreateLogStream",
-      "logs:PutLogEvents",
-      "ssm:GetParameters",
-      "secretsmanager:GetSecretValue",
-    ], var.extra_permissions))
+    content {
+      sid = ""
 
-    effect = "Allow"
+      actions = compact(concat([
+        "codecommit:GitPull",
+        "ecr:BatchCheckLayerAvailability",
+        "ecr:CompleteLayerUpload",
+        "ecr:GetAuthorizationToken",
+        "ecr:InitiateLayerUpload",
+        "ecr:PutImage",
+        "ecr:UploadLayerPart",
+        "ecs:RunTask",
+        "iam:PassRole",
+        "logs:CreateLogGroup",
+        "logs:CreateLogStream",
+        "logs:PutLogEvents",
+        "ssm:GetParameters",
+        "secretsmanager:GetSecretValue",
+      ], var.extra_permissions))
 
-    resources = [
-      "*",
-    ]
+      effect = "Allow"
+
+      resources = [
+        "*",
+      ]
+    }
   }
 
   dynamic "statement" {
@@ -191,6 +243,16 @@ data "aws_iam_policy_document" "permissions" {
         statement.value.arn,
         join("/", [statement.value.arn, "*"])
       ]
+    }
+  }
+
+  lifecycle {
+    precondition {
+      condition     = length(var.extra_permissions) > 0 ? var.default_permissions_enabled : true
+      error_message = <<-EOT
+      Extra permissions can only be attached to the default permissions policy statement.
+      Either set `default_permissions_enabled` to true or use `custom_policy` to set a least privileged policy."
+      EOT
     }
   }
 }
@@ -224,14 +286,14 @@ data "aws_iam_policy_document" "vpc_permissions" {
     ]
 
     resources = [
-      "arn:aws:ec2:${var.aws_region}:${var.aws_account_id}:network-interface/*"
+      "arn:aws:ec2:${local.aws_region}:${local.aws_account_id}:network-interface/*"
     ]
 
     condition {
       test     = "StringEquals"
       variable = "ec2:Subnet"
       values = formatlist(
-        "arn:aws:ec2:${var.aws_region}:${var.aws_account_id}:subnet/%s",
+        "arn:aws:ec2:${local.aws_region}:${local.aws_account_id}:subnet/%s",
         var.vpc_config.subnets
       )
     }
@@ -249,8 +311,9 @@ data "aws_iam_policy_document" "vpc_permissions" {
 
 data "aws_iam_policy_document" "combined_permissions" {
   override_policy_documents = compact([
-    join("", data.aws_iam_policy_document.permissions.*.json),
-    var.vpc_config != {} ? join("", data.aws_iam_policy_document.vpc_permissions.*.json) : null
+    join("", var.custom_policy),
+    join("", data.aws_iam_policy_document.permissions[*].json),
+    var.vpc_config != {} ? join("", data.aws_iam_policy_document.vpc_permissions[*].json) : null
   ])
 }
 
@@ -266,22 +329,22 @@ data "aws_iam_policy_document" "permissions_cache_bucket" {
     effect = "Allow"
 
     resources = [
-      join("", aws_s3_bucket.cache_bucket.*.arn),
-      "${join("", aws_s3_bucket.cache_bucket.*.arn)}/*",
+      join("", aws_s3_bucket.cache_bucket[*].arn),
+      "${join("", aws_s3_bucket.cache_bucket[*].arn)}/*",
     ]
   }
 }
 
 resource "aws_iam_role_policy_attachment" "default" {
   count      = module.this.enabled && var.role_arn == null ? 1 : 0
-  policy_arn = join("", aws_iam_policy.default.*.arn)
-  role       = join("", aws_iam_role.default.*.id)
+  policy_arn = join("", aws_iam_policy.default[*].arn)
+  role       = join("", aws_iam_role.default[*].id)
 }
 
 resource "aws_iam_role_policy_attachment" "default_cache_bucket" {
   count      = module.this.enabled && local.s3_cache_enabled && var.role_arn == null ? 1 : 0
-  policy_arn = join("", aws_iam_policy.default_cache_bucket.*.arn)
-  role       = join("", aws_iam_role.default.*.id)
+  policy_arn = join("", aws_iam_policy.default_cache_bucket[*].arn)
+  role       = join("", aws_iam_role.default[*].id)
 }
 
 # Build Batch IAM Role
@@ -339,7 +402,7 @@ resource "aws_codebuild_project" "default" {
   name                   = module.this.id
   description            = var.description
   concurrent_build_limit = var.concurrent_build_limit
-  service_role           = var.role_arn != null ? var.role_arn : join("", aws_iam_role.default.*.arn)
+  service_role           = var.role_arn != null ? var.role_arn : join("", aws_iam_role.default[*].arn)
   badge_enabled          = var.badge_enabled
   build_timeout          = var.build_timeout
   source_version         = var.source_version != "" ? var.source_version : null
@@ -398,12 +461,12 @@ resource "aws_codebuild_project" "default" {
 
     environment_variable {
       name  = "AWS_REGION"
-      value = signum(length(var.aws_region)) == 1 ? var.aws_region : data.aws_region.default.name
+      value = local.aws_region
     }
 
     environment_variable {
       name  = "AWS_ACCOUNT_ID"
-      value = signum(length(var.aws_account_id)) == 1 ? var.aws_account_id : data.aws_caller_identity.default.account_id
+      value = local.aws_account_id
     }
 
     dynamic "environment_variable" {
