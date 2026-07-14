@@ -1,3 +1,9 @@
+variable "additional_source_arns" {
+  type        = list(string)
+  default     = []
+  description = "Additional source ARNs allowed to assume the service role via aws:SourceArn"
+}
+
 variable "build_batch_config" {
   type = object(
     {

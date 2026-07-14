@@ -158,11 +158,11 @@ data "aws_iam_policy_document" "role" {
       test     = "StringEquals"
       variable = "aws:SourceArn"
 
-      # to avoid cyclic dependencies with codebuild, we can't reference
-      # the resources arn directly instead we interpolate the arn using known values
-      values = [
-        "arn:aws:codebuild:${local.aws_region}:${local.aws_account_id}:project/${module.this.id}"
-      ]
+      # interpolate the ARN from known values; a direct project reference would be cyclic
+      values = concat(
+        ["arn:aws:codebuild:${local.aws_region}:${local.aws_account_id}:project/${module.this.id}"],
+        var.additional_source_arns,
+      )
     }
 
     effect = "Allow"
